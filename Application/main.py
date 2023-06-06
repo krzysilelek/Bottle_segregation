@@ -20,13 +20,11 @@ def set_device():
 
 def check_bottle(sender, value, user_data):
     classes = ['Beer Bottle', 'Plastic Bottle', 'Soda Bottle', 'Water Bottle', 'Wine Bottle']
-    #print("Im here")
     dpg.configure_item("valbot", enabled=False)
     dpg.set_value(user_data, "Working...")
     global dataToSend
     what = classify(model, image_transforms, dataToSend, classes)
     dpg.set_value(user_data, what)
-    #print("END")
     dpg.configure_item("valbot", enabled=True)
 
 
@@ -35,7 +33,10 @@ def classify(model, image_transforms, image, classes):
     image = Image.fromarray(image, mode="RGB")
     image = image_transforms(image)
     image = image.unsqueeze(0)
-    image = image.to(set_device())
+
+    device = set_device()
+    image = image.to(device)
+    model = model.to(device)
 
     output = model(image)
     _, predicted = torch.max(output.data, 1)
@@ -51,8 +52,13 @@ image_transforms = transforms.Compose([
     transforms.Normalize(mean_and_std[0], mean_and_std[1])
 ])
 
+
 dpg.create_context()
-camera = cv2.VideoCapture(0)
+try:
+    camera = cv2.VideoCapture(0)
+except:
+    exit()
+
 frame_width = camera.get(cv2.CAP_PROP_FRAME_WIDTH)
 frame_height = camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
 fps_info = camera.get(cv2.CAP_PROP_FPS)
@@ -82,16 +88,22 @@ dpg.setup_dearpygui()
 dpg.show_viewport()
 dpg.set_primary_window("cam", True)
 while dpg.is_dearpygui_running():
-    ret, frame = camera.read()
-    if ret:
-        data = np.flip(frame, 2)  # BGR -> RGB
-        dataToSend = data
-        data = data.ravel()  # change frame data to 1D array
-        data = np.asfarray(data, dtype='f')  # int to float
-        data = np.true_divide(data, 255.0)
-        dpg.set_value("texture_tag", data)
-    else:
-        dpg.set_value("texture_tag", default_data)
-    dpg.render_dearpygui_frame()
+    try:
+        ret, frame = camera.read()
+        if ret:
+            data = np.flip(frame, 2)  # BGR -> RGB
+            dataToSend = data
+            data = data.ravel()  # change frame data to 1D array
+            data = np.asfarray(data, dtype='f')  # int to float
+            data = np.true_divide(data, 255.0)
+            dpg.set_value("texture_tag", data)
+        else:
+            dpg.set_value("texture_tag", default_data)
+        dpg.render_dearpygui_frame()
+    except:
+        print("Camera lost")
+        dpg.destroy_context()
+        exit()
+
 camera.release()
 dpg.destroy_context()
