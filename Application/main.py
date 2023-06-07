@@ -2,12 +2,10 @@ import dearpygui.dearpygui as dpg
 import cv2
 import numpy as np
 import array
-import torchvision
 import torch
 import torchvision.transforms as transforms
 import PIL.Image as Image
-
-dataToSend = 0
+import asyncio
 
 
 def set_device():
@@ -20,12 +18,11 @@ def set_device():
 
 def check_bottle(sender, value, user_data):
     classes = ['Beer Bottle', 'Plastic Bottle', 'Soda Bottle', 'Water Bottle', 'Wine Bottle']
-    dpg.configure_item("valbot", enabled=False)
-    dpg.set_value(user_data, "Working...")
-    global dataToSend
-    what = classify(model, image_transforms, dataToSend, classes)
-    dpg.set_value(user_data, what)
-    dpg.configure_item("valbot", enabled=True)
+    dpg.configure_item("valbut", enabled=False)
+    dpg.set_value(user_data[0], "Working...")
+    what = classify(user_data[1], user_data[2], user_data[3], classes)
+    dpg.set_value(user_data[0], what)
+    dpg.configure_item("valbut", enabled=True)
 
 
 def classify(model, image_transforms, image, classes):
@@ -36,74 +33,84 @@ def classify(model, image_transforms, image, classes):
 
     device = set_device()
     image = image.to(device)
-    model = model.to(device)
 
     output = model(image)
     _, predicted = torch.max(output.data, 1)
-
     return classes[predicted.item()]
 
 
-model = torch.load('../Model/best_model.pth')
-mean_and_std = (torch.Tensor([0.4729, 0.4099, 0.3521]), torch.Tensor([0.1786, 0.1670, 0.1610]))
-image_transforms = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean_and_std[0], mean_and_std[1])
-])
+async def load_model():
+    model = torch.load('../Model/best_model.pth').to(set_device())
+    print("Model loaded")
+    return model
 
 
-dpg.create_context()
-try:
-    camera = cv2.VideoCapture(0)
-except:
-    exit()
-
-frame_width = camera.get(cv2.CAP_PROP_FRAME_WIDTH)
-frame_height = camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
-fps_info = camera.get(cv2.CAP_PROP_FPS)
-
-texture_data = []
-for i in range(0, int(frame_width * frame_height)):
-    texture_data.append(1)
-    texture_data.append(0)
-    texture_data.append(1)
-    texture_data.append(1)
-
-default_data = list(array.array('f', texture_data))
-
-with dpg.texture_registry():
-    dpg.add_raw_texture(height=frame_height, width=frame_width, default_value=default_data, format=dpg.mvFormat_Float_rgb, tag="texture_tag")
+async def create_default_template(frame_width, frame_height):
+    texture_data = []
+    for i in range(0, int(frame_width * frame_height)):
+        texture_data.append(1)
+        texture_data.append(0)
+        texture_data.append(1)
+        texture_data.append(1)
+    return list(array.array('f', texture_data))
 
 
-with dpg.window(label="Camera", tag="cam", no_move=True, no_close=True):
-    dpg.add_text(f"Camera info: {int(frame_width)}x{int(frame_height)} {fps_info}FPS")
-    dpg.add_image("texture_tag")
-    dpg.add_text("This is:")
-    status = dpg.add_text("", tag="what_it_is")
-    dpg.add_button(label="Validate bottle", tag="valbot", callback=check_bottle, user_data=status)
+async def main():
+    model = await asyncio.create_task(load_model())
+    mean_and_std = (torch.Tensor([0.4729, 0.4099, 0.3521]), torch.Tensor([0.1786, 0.1670, 0.1610]))
+    image_transforms = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean_and_std[0], mean_and_std[1])
+    ])
 
-dpg.create_viewport(title="Bootle segregation", height=int(frame_height+0.25*frame_height), width=int(frame_width), resizable=False)
-dpg.setup_dearpygui()
-dpg.show_viewport()
-dpg.set_primary_window("cam", True)
-while dpg.is_dearpygui_running():
     try:
-        ret, frame = camera.read()
-        if ret:
-            data = np.flip(frame, 2)  # BGR -> RGB
-            dataToSend = data
-            data = data.ravel()  # change frame data to 1D array
-            data = np.asfarray(data, dtype='f')  # int to float
-            data = np.true_divide(data, 255.0)
-            dpg.set_value("texture_tag", data)
-        else:
-            dpg.set_value("texture_tag", default_data)
-        dpg.render_dearpygui_frame()
+        camera = cv2.VideoCapture(0)
     except:
-        print("Camera lost")
-        dpg.destroy_context()
+        print("Can't reach camera")
         exit()
 
-camera.release()
-dpg.destroy_context()
+    frame_width = camera.get(cv2.CAP_PROP_FRAME_WIDTH)
+    frame_height = camera.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    fps_info = camera.get(cv2.CAP_PROP_FPS)
+
+    dpg.create_context()
+
+    default_data = await asyncio.create_task(create_default_template(frame_width=frame_width, frame_height=frame_height))
+
+    with dpg.texture_registry():
+        dpg.add_raw_texture(height=frame_height, width=frame_width, default_value=default_data, format=dpg.mvFormat_Float_rgb, tag="texture_tag")
+
+    with dpg.window(label="Camera", tag="cam", no_move=True, no_close=True):
+        dpg.add_text(f"Camera info: {int(frame_width)}x{int(frame_height)} {fps_info}FPS")
+        dpg.add_image("texture_tag")
+        dpg.add_text("This is:")
+        status = dpg.add_text("", tag="what_it_is")
+        dpg.add_button(label="Validate bottle", tag="valbut", callback=check_bottle, user_data=[status, model, image_transforms, 0])
+
+    dpg.create_viewport(title="Bootle segregation", height=int(frame_height+0.25*frame_height), width=int(frame_width), resizable=False)
+    dpg.setup_dearpygui()
+    dpg.show_viewport()
+    dpg.set_primary_window("cam", True)
+    while dpg.is_dearpygui_running():
+        try:
+            ret, frame = camera.read()
+            if ret:
+                data = np.flip(frame, 2)  # BGR -> RGB
+                dpg.configure_item("valbut", user_data=[status, model, image_transforms, data])
+                data = data.ravel()  # change frame data to 1D array
+                data = np.asfarray(data, dtype='f')  # int to float
+                data = np.true_divide(data, 255.0)
+                dpg.set_value("texture_tag", data)
+            else:
+                dpg.set_value("texture_tag", default_data)
+            dpg.render_dearpygui_frame()
+        except:
+            print("Camera lost")
+            dpg.destroy_context()
+            exit()
+
+    camera.release()
+    dpg.destroy_context()
+
+asyncio.run(main())
