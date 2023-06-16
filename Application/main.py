@@ -40,7 +40,7 @@ def classify(model, image_transforms, image, classes):
 
 
 async def load_model():
-    model = torch.load('../Model/best_model.pth').to(set_device())
+    model = torch.load('../Model/best_model.pth', map_location=set_device())
     print("Model loaded")
     return model
 
