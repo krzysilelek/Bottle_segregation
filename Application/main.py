@@ -26,6 +26,7 @@ def check_bottle(sender, value, user_data):
 
 
 def classify(model, image_transforms, image, classes):
+
     model = model.eval()
     image = Image.fromarray(image, mode="RGB")
     image = image_transforms(image)
